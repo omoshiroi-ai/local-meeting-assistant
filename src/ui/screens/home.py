@@ -68,20 +68,24 @@ class HomeScreen(Screen):
 
     @work(thread=True, name="system-check")
     def _run_system_check(self) -> None:
-        """Check mic permission and Whisper model availability.
-        Runs once in a background thread on mount; updates the status bar."""
+        """Check mic, Whisper model, and embedding model availability."""
         mic_ok, mic_msg = _check_microphone()
-        model_ok, model_msg = _check_whisper_model()
+        whisper_ok, whisper_msg = _check_whisper_model()
+        embed_ok, embed_msg = _check_embedding_model()
 
         mic_icon = "[green]●[/green]" if mic_ok else "[red]●[/red]"
-        model_icon = "[green]●[/green]" if model_ok else "[red]●[/red]"
+        whisper_icon = "[green]●[/green]" if whisper_ok else "[red]●[/red]"
+        embed_icon = "[green]●[/green]" if embed_ok else "[yellow]●[/yellow]"
 
-        status = f"  {mic_icon} Mic: {mic_msg}    {model_icon} Whisper: {model_msg}"
+        status = (
+            f"  {mic_icon} Mic: {mic_msg}"
+            f"    {whisper_icon} Whisper: {whisper_msg}"
+            f"    {embed_icon} Embeddings: {embed_msg}"
+        )
         self.app.call_from_thread(
             self.query_one("#system-status", Static).update, status
         )
 
-        # Surface blocking issues as prominent notifications
         if not mic_ok:
             self.app.call_from_thread(
                 self.notify,
@@ -90,12 +94,20 @@ class HomeScreen(Screen):
                 title="Microphone unavailable",
                 timeout=10,
             )
-        if not model_ok:
+        if not whisper_ok:
             self.app.call_from_thread(
                 self.notify,
-                model_msg,
+                whisper_msg,
                 severity="warning",
                 title="Whisper model missing",
+                timeout=10,
+            )
+        if not embed_ok:
+            self.app.call_from_thread(
+                self.notify,
+                embed_msg,
+                severity="warning",
+                title="Embedding model missing",
                 timeout=10,
             )
 
@@ -209,6 +221,32 @@ def _check_whisper_model() -> tuple[bool, str]:
                 False,
                 f"{WHISPER_MODEL} not downloaded — "
                 "run: uv run python scripts/setup_models.py --whisper-only",
+            )
+
+    except Exception as exc:
+        return False, f"Check failed: {exc}"
+
+
+def _check_embedding_model() -> tuple[bool, str]:
+    """Check whether the nomic-embed-text weights are in the local HF cache."""
+    try:
+        from huggingface_hub import snapshot_download
+        from huggingface_hub.utils import LocalEntryNotFoundError
+        from src.config import EMBEDDING_MODEL
+        from pathlib import Path
+
+        model_dir = Path(EMBEDDING_MODEL)
+        if model_dir.exists():
+            return True, f"Ready ({EMBEDDING_MODEL})"
+
+        try:
+            snapshot_download(repo_id=EMBEDDING_MODEL, local_files_only=True)
+            return True, f"Ready ({EMBEDDING_MODEL})"
+        except (LocalEntryNotFoundError, Exception):
+            return (
+                False,
+                f"{EMBEDDING_MODEL} not downloaded — "
+                "run: uv run python scripts/setup_models.py",
             )
 
     except Exception as exc:

@@ -278,8 +278,20 @@ class RecordingScreen(Screen):
                 repo.update_title(self._meeting_id, title)
             repo.end(self._meeting_id)
             self.notify(f"Meeting saved (ID: {self._meeting_id}).")
+            self._run_indexing(self._meeting_id)
 
         self.app.pop_screen()
+
+    @work(thread=True, name="indexing")
+    def _run_indexing(self, meeting_id: int) -> None:
+        """Chunk, embed, and FAISS-index the meeting in the background."""
+        from src.indexing.pipeline import index_meeting
+
+        try:
+            n = index_meeting(meeting_id, self.app.conn)  # type: ignore[attr-defined]
+            logger.info("Indexing complete: %d chunks for meeting %d", n, meeting_id)
+        except Exception:
+            logger.exception("Indexing failed for meeting %d", meeting_id)
 
     def action_focus_title(self) -> None:
         self.query_one(Input).focus()

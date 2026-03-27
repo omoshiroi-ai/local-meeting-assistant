@@ -48,8 +48,3 @@ LLM_MAX_NEW_TOKENS = 512        # Max tokens for LLM response
 
 EMBEDDING_DIM = 768             # nomic-embed-text-v1.5 output dimension
 
-# --- Zoom watcher ---
-
-ZOOM_POLL_INTERVAL_S = 2        # Seconds between psutil polls
-ZOOM_PROCESS_NAME = "zoom.us"
-ZOOM_ACTIVE_PROCESS = "CptHost"  # Subprocess present only during active meetings

@@ -256,16 +256,18 @@ uv run python scripts/setup_models.py  # Downloads ~6 GB of model weights
 
 ## Implementation Phases
 
-| Phase | What | Duration |
+| Phase | What | Status |
 |---|---|---|
-| 0 | Project scaffold + DB layer + tests | 2-3 days |
-| 1 | Textual TUI shell (static/mocked data) | 3-4 days |
-| 2 | Audio capture + live STT transcription | 4-5 days |
-| 3 | Zoom auto-trigger (psutil watcher) | 1-2 days |
-| 4 | Post-meeting chunking + FAISS indexing | 3-4 days |
-| 5 | RAG chat screen | 3-4 days |
-| 6 | Polish, error handling, tests | 3-5 days |
+| 0 | Project scaffold + DB layer + tests | ✅ Done |
+| 1 | Textual TUI shell (static/mocked data) | ✅ Done |
+| 2 | Audio capture + live STT transcription | ✅ Done |
+| ~~3~~ | ~~Zoom auto-trigger (psutil watcher)~~ | ❌ Removed — manual trigger only |
+| 4 | Post-meeting chunking + FAISS indexing | ✅ Done |
+| 5 | RAG chat screen | ⬜ Pending |
+| 6 | Polish, error handling, tests | ⬜ Pending |
 
-**Total: ~3-4 weeks of focused development**
-
-Start with Phase 0 — the DB repository layer is the foundation everything else depends on.
+### Phase 2 notes
+- Fixed `tqdm` multiprocessing.RLock crash in Textual worker thread — pre-initialize lock on main thread via `tqdm.tqdm.get_lock()` in `main.py`
+- Fixed `mlx_whisper.transcribe()` tqdm crash — pass `verbose=False`
+- VAD threshold lowered to 0.005 (was 0.02) for speaker audio picked up by room mic
+- File logging to `/tmp/meeting_assistant.log` added for debugging
