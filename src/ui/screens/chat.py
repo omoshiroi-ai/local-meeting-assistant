@@ -1,11 +1,16 @@
 """ChatScreen — RAG Q&A for a selected meeting."""
 
+import logging
+
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Label, RichLog
 
 from src.ui.widgets.chat_panel import ChatPanel
+
+logger = logging.getLogger(__name__)
 
 
 class ChatScreen(Screen):
@@ -40,6 +45,7 @@ class ChatScreen(Screen):
         super().__init__()
         self._meeting_id = meeting_id
         self._session_id: int | None = None
+        self._busy = False  # prevent concurrent generations
 
     # ------------------------------------------------------------------ #
     # Compose
@@ -68,7 +74,7 @@ class ChatScreen(Screen):
                 f"  ·  {meeting.started_at[:10]}"
                 f"  ·  {duration_str}"
                 f"  ·  {seg_count} segments"
-                f"  [dim](Ctrl+T to view full transcript)[/dim]"
+                f"  [dim](Ctrl+T transcript)[/dim]"
             )
             self.sub_title = meeting.title or "Untitled"
 
@@ -82,26 +88,91 @@ class ChatScreen(Screen):
     # ------------------------------------------------------------------ #
 
     def on_chat_panel_chat_submit(self, event: ChatPanel.ChatSubmit) -> None:
-        panel = self.query_one(ChatPanel)
+        if self._busy:
+            self.notify("Still generating — please wait.", severity="warning")
+            return
+
         query = event.text
-
-        if self._session_id:
-            self.app.chat_repo.add_message(self._session_id, "user", query)  # type: ignore[attr-defined]
-
+        panel = self.query_one(ChatPanel)
         panel.add_message("user", query)
-
-        # Phase 5 will replace this with the real RAG + LLM pipeline
-        placeholder = (
-            "[dim]RAG chat integration arrives in Phase 5.\n"
-            "The pipeline will embed your query, search FAISS for relevant\n"
-            "transcript chunks, and stream a response from Qwen2.5-7B.[/dim]"
-        )
-        panel.add_message("assistant", placeholder)
 
         if self._session_id:
             self.app.chat_repo.add_message(  # type: ignore[attr-defined]
-                self._session_id, "assistant", placeholder
+                self._session_id, "user", query
             )
+
+        self._busy = True
+        self._run_rag(query)
+
+    # ------------------------------------------------------------------ #
+    # RAG worker
+    # ------------------------------------------------------------------ #
+
+    @work(thread=True, name="rag")
+    def _run_rag(self, query: str) -> None:
+        """Retrieve chunks, build context, stream LLM response. Runs in a thread."""
+        from src.rag.context_builder import build_messages
+        from src.rag.llm import LLM
+        from src.rag.retriever import Retriever
+
+        app = self.app
+        panel = self.query_one(ChatPanel)
+
+        try:
+            # --- Retrieve ---
+            retriever = Retriever(app.conn)  # type: ignore[attr-defined]
+            retriever.load()
+            chunks = retriever.retrieve(query, meeting_id=self._meeting_id)
+
+            if not chunks:
+                app.call_from_thread(
+                    panel.add_message,
+                    "assistant",
+                    "[dim]No relevant transcript segments found for this meeting. "
+                    "Make sure the meeting has been recorded and indexed.[/dim]",
+                )
+                return
+
+            # --- Build prompt ---
+            messages = build_messages(query, chunks)
+            chunk_ids = [c.id for c in chunks]
+
+            # --- Stream LLM response ---
+            llm = LLM()
+            llm.load()
+
+            app.call_from_thread(panel.begin_assistant_stream)
+            full_response: list[str] = []
+
+            for token in llm.stream(messages):
+                app.call_from_thread(panel.stream_token, token)
+                full_response.append(token)
+
+            app.call_from_thread(panel.end_assistant_stream)
+
+            # Persist assistant response
+            if self._session_id:
+                app.call_from_thread(
+                    app.chat_repo.add_message,  # type: ignore[attr-defined]
+                    self._session_id,
+                    "assistant",
+                    "".join(full_response),
+                    chunk_ids,
+                )
+
+        except Exception as exc:
+            logger.exception("RAG pipeline failed")
+            app.call_from_thread(
+                panel.add_message,
+                "assistant",
+                f"[red]Error: {exc}[/red]",
+            )
+        finally:
+            app.call_from_thread(self._set_not_busy)
+
+    def _set_not_busy(self) -> None:
+        self._busy = False
+        self.query_one(ChatPanel).focus_input()
 
     # ------------------------------------------------------------------ #
     # Actions

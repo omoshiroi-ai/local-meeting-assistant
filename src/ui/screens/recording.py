@@ -290,8 +290,22 @@ class RecordingScreen(Screen):
         try:
             n = index_meeting(meeting_id, self.app.conn)  # type: ignore[attr-defined]
             logger.info("Indexing complete: %d chunks for meeting %d", n, meeting_id)
-        except Exception:
+            if n > 0:
+                self.app.call_from_thread(
+                    self.app.notify,
+                    f"Meeting indexed: {n} chunks ready for chat.",
+                    title="Indexing complete",
+                    timeout=5,
+                )
+        except Exception as exc:
             logger.exception("Indexing failed for meeting %d", meeting_id)
+            self.app.call_from_thread(
+                self.app.notify,
+                f"Indexing failed: {exc}",
+                severity="warning",
+                title="Indexing error",
+                timeout=8,
+            )
 
     def action_focus_title(self) -> None:
         self.query_one(Input).focus()

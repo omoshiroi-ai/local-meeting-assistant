@@ -263,8 +263,8 @@ uv run python scripts/setup_models.py  # Downloads ~6 GB of model weights
 | 2 | Audio capture + live STT transcription | ✅ Done |
 | ~~3~~ | ~~Zoom auto-trigger (psutil watcher)~~ | ❌ Removed — manual trigger only |
 | 4 | Post-meeting chunking + FAISS indexing | ✅ Done |
-| 5 | RAG chat screen | ⬜ Pending |
-| 6 | Polish, error handling, tests | ⬜ Pending |
+| 5 | RAG chat screen | ✅ Done |
+| 6 | Polish, error handling, tests | ✅ Done |
 
 ### Phase 2 notes
 - Fixed `tqdm` multiprocessing.RLock crash in Textual worker thread — pre-initialize lock on main thread via `tqdm.tqdm.get_lock()` in `main.py`

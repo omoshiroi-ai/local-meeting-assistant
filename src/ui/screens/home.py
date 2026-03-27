@@ -29,7 +29,7 @@ class HomeScreen(Screen):
 
     DEFAULT_CSS = """
     #system-status {
-        height: 2;
+        height: 3;
         padding: 0 2;
         background: $surface-darken-1;
         border-top: tall $primary-darken-2;
@@ -68,19 +68,22 @@ class HomeScreen(Screen):
 
     @work(thread=True, name="system-check")
     def _run_system_check(self) -> None:
-        """Check mic, Whisper model, and embedding model availability."""
+        """Check mic, Whisper, embedding, and LLM model availability."""
         mic_ok, mic_msg = _check_microphone()
         whisper_ok, whisper_msg = _check_whisper_model()
         embed_ok, embed_msg = _check_embedding_model()
+        llm_ok, llm_msg = _check_llm_model()
 
         mic_icon = "[green]●[/green]" if mic_ok else "[red]●[/red]"
         whisper_icon = "[green]●[/green]" if whisper_ok else "[red]●[/red]"
         embed_icon = "[green]●[/green]" if embed_ok else "[yellow]●[/yellow]"
+        llm_icon = "[green]●[/green]" if llm_ok else "[yellow]●[/yellow]"
 
         status = (
             f"  {mic_icon} Mic: {mic_msg}"
             f"    {whisper_icon} Whisper: {whisper_msg}"
-            f"    {embed_icon} Embeddings: {embed_msg}"
+            f"    {embed_icon} Embed: {embed_msg}"
+            f"    {llm_icon} LLM: {llm_msg}"
         )
         self.app.call_from_thread(
             self.query_one("#system-status", Static).update, status
@@ -88,27 +91,23 @@ class HomeScreen(Screen):
 
         if not mic_ok:
             self.app.call_from_thread(
-                self.notify,
-                mic_msg,
-                severity="error",
-                title="Microphone unavailable",
-                timeout=10,
+                self.notify, mic_msg, severity="error",
+                title="Microphone unavailable", timeout=10,
             )
         if not whisper_ok:
             self.app.call_from_thread(
-                self.notify,
-                whisper_msg,
-                severity="warning",
-                title="Whisper model missing",
-                timeout=10,
+                self.notify, whisper_msg, severity="warning",
+                title="Whisper model missing", timeout=10,
             )
         if not embed_ok:
             self.app.call_from_thread(
-                self.notify,
-                embed_msg,
-                severity="warning",
-                title="Embedding model missing",
-                timeout=10,
+                self.notify, embed_msg, severity="warning",
+                title="Embedding model missing", timeout=10,
+            )
+        if not llm_ok:
+            self.app.call_from_thread(
+                self.notify, llm_msg, severity="warning",
+                title="LLM model missing", timeout=10,
             )
 
     # ------------------------------------------------------------------ #
@@ -201,53 +200,39 @@ def _check_microphone() -> tuple[bool, str]:
         return False, f"Error: {exc}"
 
 
-def _check_whisper_model() -> tuple[bool, str]:
-    """Check whether the Whisper model weights are in the local HF cache."""
+def _check_hf_model(repo_id: str, setup_flag: str = "") -> tuple[bool, str]:
+    """Generic HuggingFace model cache check. Returns (ok, short_message)."""
     try:
+        from pathlib import Path
         from huggingface_hub import snapshot_download
         from huggingface_hub.utils import LocalEntryNotFoundError
-        from src.config import WHISPER_MODEL
-        from pathlib import Path
 
-        model_dir = Path(WHISPER_MODEL)
-        if model_dir.exists():
-            return True, f"Ready ({WHISPER_MODEL})"
+        short = repo_id.split("/")[-1]  # e.g. "whisper-large-v3-turbo"
+
+        if Path(repo_id).exists():
+            return True, f"[green]Ready[/green] [dim]{short}[/dim]"
 
         try:
-            snapshot_download(repo_id=WHISPER_MODEL, local_files_only=True)
-            return True, f"Ready ({WHISPER_MODEL})"
+            snapshot_download(repo_id=repo_id, local_files_only=True)
+            return True, f"[green]Ready[/green] [dim]{short}[/dim]"
         except (LocalEntryNotFoundError, Exception):
-            return (
-                False,
-                f"{WHISPER_MODEL} not downloaded — "
-                "run: uv run python scripts/setup_models.py --whisper-only",
-            )
+            cmd = f"setup_models.py {setup_flag}".strip()
+            return False, f"[red]Missing[/red] [dim]{short} — run: uv run python scripts/{cmd}[/dim]"
 
     except Exception as exc:
-        return False, f"Check failed: {exc}"
+        return False, f"[red]Error[/red] [dim]{exc}[/dim]"
+
+
+def _check_whisper_model() -> tuple[bool, str]:
+    from src.config import WHISPER_MODEL
+    return _check_hf_model(WHISPER_MODEL, "--whisper-only")
 
 
 def _check_embedding_model() -> tuple[bool, str]:
-    """Check whether the nomic-embed-text weights are in the local HF cache."""
-    try:
-        from huggingface_hub import snapshot_download
-        from huggingface_hub.utils import LocalEntryNotFoundError
-        from src.config import EMBEDDING_MODEL
-        from pathlib import Path
+    from src.config import EMBEDDING_MODEL
+    return _check_hf_model(EMBEDDING_MODEL)
 
-        model_dir = Path(EMBEDDING_MODEL)
-        if model_dir.exists():
-            return True, f"Ready ({EMBEDDING_MODEL})"
 
-        try:
-            snapshot_download(repo_id=EMBEDDING_MODEL, local_files_only=True)
-            return True, f"Ready ({EMBEDDING_MODEL})"
-        except (LocalEntryNotFoundError, Exception):
-            return (
-                False,
-                f"{EMBEDDING_MODEL} not downloaded — "
-                "run: uv run python scripts/setup_models.py",
-            )
-
-    except Exception as exc:
-        return False, f"Check failed: {exc}"
+def _check_llm_model() -> tuple[bool, str]:
+    from src.config import LLM_MODEL
+    return _check_hf_model(LLM_MODEL)
