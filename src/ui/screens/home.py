@@ -1,11 +1,15 @@
 """HomeScreen — meeting list, entry point for recording and chat."""
 
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
-from textual.widgets import Footer, Header
+from textual.widgets import Footer, Header, Static
 
 from src.ui.widgets.meeting_list import MeetingList
+
+# Shown while the background check is running
+_CHECKING = "[dim]Checking system…[/dim]"
 
 
 class HomeScreen(Screen):
@@ -23,6 +27,17 @@ class HomeScreen(Screen):
         Binding("q", "app.quit", "Quit"),
     ]
 
+    DEFAULT_CSS = """
+    #system-status {
+        height: 2;
+        padding: 0 2;
+        background: $surface-darken-1;
+        border-top: tall $primary-darken-2;
+        color: $text-muted;
+        content-align: left middle;
+    }
+    """
+
     _selected_meeting_id: int | None = None
 
     # ------------------------------------------------------------------ #
@@ -32,16 +47,57 @@ class HomeScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield MeetingList(id="meeting-list")
+        yield Static(_CHECKING, id="system-status", markup=True)
         yield Footer()
 
     # ------------------------------------------------------------------ #
     # Lifecycle
     # ------------------------------------------------------------------ #
 
+    def on_mount(self) -> None:
+        self._run_system_check()
+
     def on_screen_resume(self) -> None:
-        """Refresh the list whenever we return from recording or chat."""
+        """Refresh the meeting list whenever we return from recording or chat."""
         self._selected_meeting_id = None
         self.query_one(MeetingList).refresh_meetings()
+
+    # ------------------------------------------------------------------ #
+    # System check worker
+    # ------------------------------------------------------------------ #
+
+    @work(thread=True, name="system-check")
+    def _run_system_check(self) -> None:
+        """Check mic permission and Whisper model availability.
+        Runs once in a background thread on mount; updates the status bar."""
+        mic_ok, mic_msg = _check_microphone()
+        model_ok, model_msg = _check_whisper_model()
+
+        mic_icon = "[green]●[/green]" if mic_ok else "[red]●[/red]"
+        model_icon = "[green]●[/green]" if model_ok else "[red]●[/red]"
+
+        status = f"  {mic_icon} Mic: {mic_msg}    {model_icon} Whisper: {model_msg}"
+        self.app.call_from_thread(
+            self.query_one("#system-status", Static).update, status
+        )
+
+        # Surface blocking issues as prominent notifications
+        if not mic_ok:
+            self.app.call_from_thread(
+                self.notify,
+                mic_msg,
+                severity="error",
+                title="Microphone unavailable",
+                timeout=10,
+            )
+        if not model_ok:
+            self.app.call_from_thread(
+                self.notify,
+                model_msg,
+                severity="warning",
+                title="Whisper model missing",
+                timeout=10,
+            )
 
     # ------------------------------------------------------------------ #
     # Widget events
@@ -87,4 +143,73 @@ class HomeScreen(Screen):
 
     def action_refresh(self) -> None:
         self.query_one(MeetingList).refresh_meetings()
-        self.notify("Refreshed.")
+        self._run_system_check()
+
+
+# ------------------------------------------------------------------ #
+# Check helpers (pure functions, no UI deps, safe to call from a thread)
+# ------------------------------------------------------------------ #
+
+
+def _check_microphone() -> tuple[bool, str]:
+    """Open the mic for 0.5 s and verify it returns non-zero audio."""
+    try:
+        import time
+        import numpy as np
+        import sounddevice as sd
+
+        chunks: list[np.ndarray] = []
+
+        def _cb(indata, frames, t, status):
+            chunks.append(indata[:, 0].copy())
+
+        with sd.InputStream(
+            samplerate=16000, channels=1, dtype="float32",
+            blocksize=1024, callback=_cb
+        ):
+            time.sleep(0.5)
+
+        if not chunks:
+            return False, "No audio received from device"
+
+        max_rms = max(float(np.sqrt(np.mean(c ** 2))) for c in chunks)
+
+        if max_rms == 0.0:
+            return (
+                False,
+                "Mic returns silence — grant Terminal microphone access in "
+                "System Settings → Privacy & Security → Microphone",
+            )
+
+        device = sd.query_devices(kind="input")
+        name = device.get("name", "unknown") if isinstance(device, dict) else "unknown"
+        return True, f"{name} (RMS {max_rms:.4f})"
+
+    except Exception as exc:
+        return False, f"Error: {exc}"
+
+
+def _check_whisper_model() -> tuple[bool, str]:
+    """Check whether the Whisper model weights are in the local HF cache."""
+    try:
+        from huggingface_hub import snapshot_download
+        from huggingface_hub.utils import LocalEntryNotFoundError
+        from src.config import WHISPER_MODEL
+        from pathlib import Path
+
+        model_dir = Path(WHISPER_MODEL)
+        if model_dir.exists():
+            return True, f"Ready ({WHISPER_MODEL})"
+
+        try:
+            snapshot_download(repo_id=WHISPER_MODEL, local_files_only=True)
+            return True, f"Ready ({WHISPER_MODEL})"
+        except (LocalEntryNotFoundError, Exception):
+            return (
+                False,
+                f"{WHISPER_MODEL} not downloaded — "
+                "run: uv run python scripts/setup_models.py --whisper-only",
+            )
+
+    except Exception as exc:
+        return False, f"Check failed: {exc}"

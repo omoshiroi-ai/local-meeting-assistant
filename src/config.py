@@ -29,7 +29,7 @@ LLM_MODEL = os.environ.get(
 AUDIO_SAMPLE_RATE = 16000       # Hz — Whisper's native rate
 AUDIO_CHANNELS = 1              # Mono
 AUDIO_CHUNK_SIZE = 1024         # Frames per PyAudio buffer read
-VAD_SILENCE_THRESHOLD = 0.02    # RMS amplitude (float32 normalized)
+VAD_SILENCE_THRESHOLD = 0.005   # RMS amplitude (float32 normalized)
 VAD_SILENCE_DURATION_S = 0.8    # Seconds of silence before flushing chunk
 VAD_MAX_CHUNK_S = 30            # Max seconds before forcing a flush
 

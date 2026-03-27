@@ -1,10 +1,23 @@
 """Entrypoint for the local meeting assistant."""
 
+import logging
 import sqlite3
+from pathlib import Path
 
 from src.config import DATA_DIR, DB_PATH, FAISS_DIR
 from src.db.migrations import run_migrations
 from src.db.schema import init_db
+
+LOG_PATH = Path("/tmp/meeting_assistant.log")
+
+
+def _setup_logging() -> None:
+    LOG_PATH.unlink(missing_ok=True)  # fresh log each run
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[logging.FileHandler(LOG_PATH)],
+    )
 
 
 def _ensure_dirs() -> None:
@@ -20,7 +33,22 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _preinit_tqdm_lock() -> None:
+    """Pre-initialize tqdm's multiprocessing lock on the main thread.
+
+    mlx_whisper.transcribe() uses tqdm internally, which lazily creates a
+    multiprocessing.RLock on first use.  That creation fails inside Textual's
+    thread-pool executor because the resource tracker can't fork from there.
+    Calling get_lock() here ensures the lock is created once on the main thread
+    so worker threads just reuse it.
+    """
+    import tqdm
+    tqdm.tqdm.get_lock()
+
+
 def main() -> None:
+    _setup_logging()
+    _preinit_tqdm_lock()
     _ensure_dirs()
     from src.ui.app import MeetingAssistantApp
 

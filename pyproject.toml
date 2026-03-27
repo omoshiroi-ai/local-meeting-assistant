@@ -1,0 +1,55 @@
+[project]
+name = "local-meeting-assistant"
+version = "0.1.0"
+description = "Local-first meeting assistant with STT, RAG, and TUI on Apple Silicon"
+requires-python = ">=3.12"
+dependencies = [
+    # ML stack
+    "mlx>=0.24.0",
+    "mlx-lm>=0.21.0",
+    "mlx-whisper>=0.4.1",
+    # Vector search
+    "faiss-cpu>=1.9.0",
+    "numpy>=2.0.0",
+    # Audio
+    "sounddevice>=0.5.0",
+    "soundfile>=0.12.0",
+    # TUI
+    "textual>=1.0.0",
+    # Text processing
+    "tiktoken>=0.9.0",
+    # Utilities
+    "huggingface-hub>=0.26.0",
+    "psutil>=6.0.0",
+    "tqdm>=4.67.0",
+]
+
+[project.scripts]
+meeting-assistant = "src.main:main"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+    "textual-dev>=1.0.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

@@ -13,6 +13,7 @@ Usage (from a thread worker)::
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -34,30 +35,54 @@ class Transcriber:
     def __init__(self, model_name: str = WHISPER_MODEL) -> None:
         self._model_name = model_name
         self._loaded = False
+        self._local_path: str | None = None  # resolved after load()
 
     # ------------------------------------------------------------------ #
     # Public API
     # ------------------------------------------------------------------ #
 
     def load(self) -> None:
-        """Download (if needed) and warm up the model. Safe to call multiple times.
+        """Resolve the cached model path and load weights into MLX.
 
-        mlx_whisper uses an internal ModelHolder that caches the loaded model
-        between transcribe() calls.  We trigger it here by transcribing a tiny
-        silent array so that:
-          1. snapshot_download() pulls the weights from HuggingFace (first run only)
-          2. The model is compiled and resident in memory before real audio arrives
+        Must be called before transcribe().  Safe to call multiple times.
+
+        We intentionally use local_files_only=True here to avoid tqdm creating
+        a multiprocessing.RLock inside Textual's thread-pool executor, which
+        fails with a resource-tracker error.  Run scripts/setup_models.py first
+        to download the weights.
         """
         if self._loaded:
             return
-        logger.info("Downloading + loading Whisper model: %s", self._model_name)
-        import numpy as np
-        import mlx_whisper
 
-        # 0.5 s of silence at 16 kHz — enough to trigger model load, discarded immediately
-        dummy = np.zeros(8000, dtype=np.float32)
-        mlx_whisper.transcribe(dummy, path_or_hf_repo=self._model_name)
+        from huggingface_hub import snapshot_download
+        from huggingface_hub.utils import LocalEntryNotFoundError
+        import mlx.core as mx
+        from mlx_whisper.load_models import load_model
+        from mlx_whisper.transcribe import ModelHolder
 
+        logger.info("Resolving Whisper model path: %s", self._model_name)
+
+        # Resolve local path — no network, no tqdm, no multiprocessing locks
+        model_dir = Path(self._model_name)
+        if model_dir.exists():
+            local_path = str(model_dir)
+        else:
+            try:
+                local_path = snapshot_download(
+                    repo_id=self._model_name,
+                    local_files_only=True,
+                )
+            except (LocalEntryNotFoundError, Exception) as exc:
+                raise RuntimeError(
+                    f"Whisper model '{self._model_name}' not found in local cache.\n"
+                    f"Download it first:\n"
+                    f"  uv run python scripts/setup_models.py --whisper-only\n"
+                    f"Original error: {exc}"
+                ) from exc
+
+        logger.info("Loading Whisper weights from: %s", local_path)
+        ModelHolder.get_model(local_path, mx.float16)
+        self._local_path = local_path
         self._loaded = True
         logger.info("Whisper model ready.")
 
@@ -80,11 +105,13 @@ class Transcriber:
         duration_ms = int(len(audio) / 16000 * 1000)
 
         try:
-            kwargs: dict = {"path_or_hf_repo": self._model_name}
+            # Use the resolved local path so ModelHolder hits the cache every time
+            path = self._local_path or self._model_name
+            kwargs: dict = {"path_or_hf_repo": path}
             if language:
                 kwargs["language"] = language
 
-            result = mlx_whisper.transcribe(audio, **kwargs)
+            result = mlx_whisper.transcribe(audio, verbose=False, **kwargs)
         except Exception:
             logger.exception("Whisper transcription failed")
             return None

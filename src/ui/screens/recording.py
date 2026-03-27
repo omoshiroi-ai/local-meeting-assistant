@@ -72,6 +72,8 @@ class RecordingScreen(Screen):
         self._stop_event = threading.Event()
         self._recording_start: float = 0.0
         self._pipeline_worker: Worker | None = None
+        self._segment_count: int = 0
+        self._last_rms: float = 0.0
 
     # ------------------------------------------------------------------ #
     # Compose
@@ -116,14 +118,21 @@ class RecordingScreen(Screen):
 
     def _tick_timer(self) -> None:
         self._elapsed += 1
+        self._refresh_status_bar()
+
+    def _refresh_status_bar(self) -> None:
         h = self._elapsed // 3600
         m = (self._elapsed % 3600) // 60
         s = self._elapsed % 60
-        self._update_status(f"[red bold]●[/red bold] REC  [dim]{h:02d}:{m:02d}:{s:02d}[/dim]")
+        rms_bar = _rms_bar(self._last_rms)
+        segs = f"  [dim]{self._segment_count} segment{'s' if self._segment_count != 1 else ''}[/dim]"
+        self.query_one("#status-bar", Static).update(
+            f"[red bold]●[/red bold] REC  [dim]{h:02d}:{m:02d}:{s:02d}[/dim]"
+            f"  {rms_bar}{segs}"
+        )
 
     def _update_status(self, text: str) -> None:
-        mid_info = f"  Meeting #{self._meeting_id}" if self._meeting_id else ""
-        self.query_one("#status-bar", Static).update(text + mid_info)
+        self.query_one("#status-bar", Static).update(text)
 
     # ------------------------------------------------------------------ #
     # Audio pipeline worker
@@ -173,6 +182,8 @@ class RecordingScreen(Screen):
         app.call_from_thread(log.append_status, "Listening… speak now.")
 
         vad = EnergyVAD()
+        import numpy as np
+        _ui_tick = 0  # throttle: update VAD bar every N chunks (~5 Hz)
 
         try:
             while not self._stop_event.is_set():
@@ -180,10 +191,15 @@ class RecordingScreen(Screen):
                 if chunk is None:
                     continue
 
+                rms = float(np.sqrt(np.mean(chunk ** 2)))
                 result = vad.process(chunk)
 
-                # Update VAD indicator on every chunk (throttled by chunk rate ~78 Hz)
-                app.call_from_thread(self.set_vad_active, result.is_speech)
+                # Update VAD bar at ~5 Hz to avoid flooding the event loop
+                _ui_tick += 1
+                if _ui_tick % 16 == 0:
+                    self._last_rms = rms
+                    app.call_from_thread(self.set_vad_active, result.is_speech)
+                    app.call_from_thread(self._refresh_status_bar)
 
                 if result.audio is not None:
                     offset_ms = int(result.offset_samples / capture.sample_rate * 1000)
@@ -224,7 +240,9 @@ class RecordingScreen(Screen):
         seq = seg_repo.next_sequence_num(self._meeting_id)
         end_ms = int((time.monotonic() - self._recording_start) * 1000)
         seg_repo.insert(self._meeting_id, seq, text, offset_ms, end_ms)
+        self._segment_count += 1
         self.query_one(TranscriptLog).append_segment(text, offset_ms)
+        self._refresh_status_bar()
 
     def set_vad_active(self, active: bool) -> None:
         """Update the VAD bar. Runs on main thread."""
@@ -276,3 +294,12 @@ def _vad_bar(active: bool) -> str:
     if active:
         return "  VAD [bold green]●●●●○[/bold green]  Speaking"
     return "  VAD [dim]○○○○○[/dim]  Silence"
+
+
+def _rms_bar(rms: float) -> str:
+    """Visual RMS level indicator, e.g. ▁▃▅▇ RMS:0.0123"""
+    level = min(int(rms * 1000), 8)  # 0-8 blocks
+    blocks = "▁▂▃▄▅▆▇█"
+    filled = blocks[level - 1] if level > 0 else " "
+    color = "green" if rms > 0.005 else "dim"
+    return f"[{color}]{filled * level}[/{color}] [dim]RMS:{rms:.4f}[/dim]"
