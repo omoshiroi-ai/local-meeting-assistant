@@ -37,11 +37,8 @@ def download_embeddings(model_name: str) -> None:
     print(f"\n[2/3] Embeddings — {model_name}")
     print("      Downloading…")
     t0 = time.monotonic()
-    from huggingface_hub import snapshot_download
-    local_path = snapshot_download(repo_id=model_name)
-    print("      Weights downloaded. Loading into MLX…")
-    from mlx_lm import load
-    load(local_path)
+    from sentence_transformers import SentenceTransformer
+    SentenceTransformer(model_name, trust_remote_code=True)
     elapsed = time.monotonic() - t0
     print(f"      ✓ Done in {elapsed:.0f}s")
 

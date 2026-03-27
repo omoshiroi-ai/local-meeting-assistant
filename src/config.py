@@ -18,7 +18,7 @@ WHISPER_MODEL = os.environ.get(
     "WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo"
 )
 EMBEDDING_MODEL = os.environ.get(
-    "EMBEDDING_MODEL", "mlx-community/nomic-embed-text-v1.5"
+    "EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5"
 )
 LLM_MODEL = os.environ.get(
     "LLM_MODEL", "mlx-community/Qwen2.5-7B-Instruct-4bit"

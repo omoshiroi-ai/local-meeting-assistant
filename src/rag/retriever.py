@@ -49,9 +49,12 @@ class Retriever:
         if not self._loaded:
             self.load()
 
-        # Embed with search_query prefix (nomic convention)
-        import numpy as np
-        vec = self._embedder.encode([f"search_query: {query}"])[0]
+        # nomic-embed-text uses search_query prefix for retrieval queries
+        vec = self._embedder._model.encode(  # type: ignore[union-attr]
+            f"search_query: {query}",
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        ).astype("float32")
 
         fetch_k = k * 3 if meeting_id is not None else k
         chunk_ids = self._store.search(vec, k=fetch_k)
