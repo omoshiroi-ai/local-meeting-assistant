@@ -13,7 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.db import connect, init_db
 from backend.routers import sessions, transcription
+from backend.routers import chat
 from backend.services.transcriber import _ensure_model
+from backend.services.llm import LLM_MODEL, LLM_PORT, LLM_SERVER_URL, start_llm_server
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,21 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("Failed to prepare Whisper model at startup: %s", exc)
 
+    app.state.llm_url = LLM_SERVER_URL
+    llm_proc = None
+    try:
+        llm_proc = await start_llm_server()
+    except Exception as exc:
+        logger.error("Failed to start mlx-lm server: %s", exc)
+
     yield
+
+    if llm_proc is not None and llm_proc.returncode is None:
+        llm_proc.terminate()
+        try:
+            await asyncio.wait_for(llm_proc.wait(), timeout=10)
+        except asyncio.TimeoutError:
+            llm_proc.kill()
     conn.close()
 
 
@@ -46,6 +62,7 @@ app.add_middleware(
 
 app.include_router(sessions.router)
 app.include_router(transcription.router)
+app.include_router(chat.router)
 
 
 @app.get("/api/health")
