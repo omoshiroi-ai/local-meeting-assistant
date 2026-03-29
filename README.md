@@ -4,16 +4,16 @@ A fully local, privacy-first meeting assistant for Apple Silicon Macs. Records m
 
 ## Architecture
 
-```
-Browser (Next.js :3000)
-    │
-    ├── /api/*  ──────────────────►  FastAPI backend (:8765)
-    │              (Next.js rewrite)      │
-    │                                     ├── SQLite  (sessions, transcripts)
-    │                                     └── /v1/chat/completions  ──►  mlx-lm (:8080)
-    │                                                                    (auto-started)
-    └── /api/chat  (Next.js route handler)
-            └── streamText  ──────────────►  FastAPI :8765/v1/chat/completions
+```mermaid
+graph LR
+    Browser["Browser<br/>(Next.js :3000)"]
+
+    Browser -- "/api/* (rewrite)" --> FastAPI["FastAPI backend<br/>(:8765)"]
+    FastAPI --> SQLite["SQLite<br/>(sessions, transcripts)"]
+    FastAPI -- "/v1/chat/completions" --> MLX["mlx-lm<br/>(:8080, auto-started)"]
+
+    Browser -- "/api/chat<br/>(route handler)" --> StreamText["streamText"]
+    StreamText -- "/v1/chat/completions" --> FastAPI
 ```
 
 The backend auto-starts the `mlx-lm` server on first request and proxies all `/v1/chat/completions` calls to it. You only need to run two processes.
