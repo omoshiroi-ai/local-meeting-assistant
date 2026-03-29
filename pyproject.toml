@@ -1,7 +1,7 @@
 [project]
 name = "local-meeting-assistant"
 version = "0.1.0"
-description = "Local-first meeting assistant with STT, RAG, and TUI on Apple Silicon"
+description = "Local-first meeting assistant with STT, RAG, and web UI on Apple Silicon"
 requires-python = ">=3.12"
 dependencies = [
     # ML stack
@@ -14,8 +14,6 @@ dependencies = [
     # Audio
     "sounddevice>=0.5.0",
     "soundfile>=0.12.0",
-    # TUI
-    "textual>=1.0.0",
     # Text processing
     "tiktoken>=0.9.0",
     # Embeddings
@@ -26,21 +24,29 @@ dependencies = [
     "psutil>=6.0.0",
     "tqdm>=4.67.0",
     "fastapi>=0.115.0",
+    "httpx>=0.27.0",
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.0.0",
+    "python-multipart>=0.0.9",
+    "mlx-audio",
+    "av>=17.0.0",
 ]
 
 [project.scripts]
 meeting-assistant = "src.main:main"
-meeting-assistant-api = "src.api.main:main"
+
+[tool.fastapi]
+entrypoint = "src.api.main:app"
 
 [tool.uv]
 dev-dependencies = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "ruff>=0.8.0",
-    "textual-dev>=1.0.0",
 ]
+
+[tool.uv.sources]
+mlx-audio = { path = "reference/mlx-audio" }
 
 [tool.ruff]
 line-length = 100

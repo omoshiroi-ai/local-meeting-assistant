@@ -1,106 +1,121 @@
-"""Download and cache all required MLX models.
+"""Download and warm up all required models before running the backend.
 
 Run once before first use:
     uv run python scripts/setup_models.py
 
-Models downloaded:
-    - mlx-community/whisper-large-v3-turbo  (~800 MB)  STT
-    - mlx-community/nomic-embed-text-v1.5   (~275 MB)  Embeddings
-    - mlx-community/Qwen2.5-7B-Instruct-4bit (~4.5 GB) Chat LLM
-
-Pass --whisper-only to download just the STT model.
+Models:
+    - mlx-community/whisper-large-v3-turbo  (~800 MB)  STT  [required]
 """
+
+from __future__ import annotations
 
 import argparse
 import sys
 import time
+from pathlib import Path
+
+WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 
 
-def download_whisper(model_name: str) -> None:
-    print(f"\n[1/3] Whisper STT — {model_name}")
-    print("      Downloading… this may take several minutes.")
+def _get_snapshot(model_id: str) -> Path | None:
+    from huggingface_hub import scan_cache_dir
+    try:
+        for repo in scan_cache_dir().repos:
+            if repo.repo_id == model_id:
+                revisions = list(repo.revisions)
+                if revisions:
+                    return revisions[0].snapshot_path
+    except Exception:
+        pass
+    return None
+
+
+def setup_whisper(model_id: str) -> bool:
+    print(f"\n[ Whisper STT ]")
+    print(f"  Model : {model_id}")
     t0 = time.monotonic()
-    # Use snapshot_download directly — safe on the main thread (tqdm works here)
-    from huggingface_hub import snapshot_download
-    import mlx.core as mx
-    from mlx_whisper.load_models import load_model
-    from mlx_whisper.transcribe import ModelHolder
 
-    local_path = snapshot_download(repo_id=model_name)
-    print("      Weights downloaded. Loading into MLX…")
-    ModelHolder.get_model(local_path, mx.float16)
-    elapsed = time.monotonic() - t0
-    print(f"      ✓ Done in {elapsed:.0f}s")
+    # Step 1 — download weights
+    snapshot = _get_snapshot(model_id)
+    if snapshot and (snapshot / "weights.safetensors").exists():
+        print(f"  Weights: already cached")
+        print(f"           {snapshot}")
+    else:
+        print("  Weights: downloading (~800 MB)…")
+        try:
+            from huggingface_hub import snapshot_download
+            local = snapshot_download(repo_id=model_id)
+            print(f"  Weights: downloaded to {local} ({time.monotonic() - t0:.0f}s)")
+        except Exception as e:
+            print(f"  Weights: FAILED — {e}", file=sys.stderr)
+            return False
+
+    # Step 2 — warm up: run a silent transcription to load weights into MLX
+    print("  Loading into MLX… ", end="", flush=True)
+    t1 = time.monotonic()
+    try:
+        import numpy as np
+        import mlx_whisper
+        # 1-second silence as float32 array — triggers model load without ffmpeg
+        silence = np.zeros(16000, dtype=np.float32)
+        mlx_whisper.transcribe(silence, path_or_hf_repo=model_id, verbose=False)
+        print(f"OK ({time.monotonic() - t1:.0f}s)")
+    except Exception as e:
+        print(f"FAILED\n  Error: {e}", file=sys.stderr)
+        return False
+
+    print(f"  Total : {time.monotonic() - t0:.0f}s")
+    return True
 
 
-def download_embeddings(model_name: str) -> None:
-    print(f"\n[2/3] Embeddings — {model_name}")
-    print("      Downloading…")
-    t0 = time.monotonic()
-    from sentence_transformers import SentenceTransformer
-    SentenceTransformer(model_name, trust_remote_code=True)
-    elapsed = time.monotonic() - t0
-    print(f"      ✓ Done in {elapsed:.0f}s")
-
-
-def download_llm(model_name: str) -> None:
-    print(f"\n[3/3] Chat LLM — {model_name}")
-    print("      Downloading… (~4.5 GB, largest download)")
-    t0 = time.monotonic()
-    from huggingface_hub import snapshot_download
-    snapshot_download(repo_id=model_name)
-    elapsed = time.monotonic() - t0
-    print(f"      ✓ Done in {elapsed:.0f}s")
+def check_whisper(model_id: str) -> None:
+    snapshot = _get_snapshot(model_id)
+    if snapshot and (snapshot / "weights.safetensors").exists():
+        print(f"  [OK]  {model_id}")
+        print(f"        {snapshot}")
+    else:
+        print(f"  [--]  {model_id}  (not downloaded)")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Download MLX models for local-meeting-assistant.")
-    parser.add_argument(
-        "--whisper-only",
-        action="store_true",
-        help="Download only the Whisper STT model (fastest, needed to transcribe).",
+    parser = argparse.ArgumentParser(
+        description="Download and verify all models for local-meeting-assistant.",
     )
     parser.add_argument(
         "--whisper-model",
-        default=None,
-        help="Override the Whisper model ID (default: from src/config.py).",
+        default=WHISPER_MODEL,
+        metavar="HF_REPO",
+        help=f"Override Whisper model (default: {WHISPER_MODEL})",
+    )
+    parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Report cache status without downloading.",
     )
     args = parser.parse_args()
 
-    from src.config import EMBEDDING_MODEL, LLM_MODEL, WHISPER_MODEL
-
-    whisper_model = args.whisper_model or WHISPER_MODEL
-
-    print("=" * 60)
+    width = 60
+    print("=" * width)
     print("  Local Meeting Assistant — Model Setup")
-    print("=" * 60)
+    print("=" * width)
+
+    if args.check_only:
+        print()
+        check_whisper(args.whisper_model)
+        print()
+        return
 
     total_start = time.monotonic()
+    ok = setup_whisper(args.whisper_model)
 
-    try:
-        download_whisper(whisper_model)
-    except Exception as e:
-        print(f"\n  ERROR downloading Whisper: {e}", file=sys.stderr)
+    print(f"\n{'=' * width}")
+    if ok:
+        print(f"  Done. ({time.monotonic() - total_start:.0f}s)")
+        print(f"  Start backend:  uv run python -m backend.main")
+    else:
+        print(f"  Setup failed. Check errors above.")
         sys.exit(1)
-
-    if not args.whisper_only:
-        try:
-            download_embeddings(EMBEDDING_MODEL)
-        except Exception as e:
-            print(f"\n  WARNING: Embeddings download failed: {e}", file=sys.stderr)
-            print("  (Needed for Phase 4 indexing — you can retry later)")
-
-        try:
-            download_llm(LLM_MODEL)
-        except Exception as e:
-            print(f"\n  WARNING: LLM download failed: {e}", file=sys.stderr)
-            print("  (Needed for Phase 5 chat — you can retry later)")
-
-    total = time.monotonic() - total_start
-    print(f"\n{'=' * 60}")
-    print(f"  Setup complete in {total:.0f}s.")
-    print(f"  Run the app:  uv run meeting-assistant")
-    print(f"{'=' * 60}\n")
+    print(f"{'=' * width}\n")
 
 
 if __name__ == "__main__":
