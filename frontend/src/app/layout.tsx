@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Inter } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
 import StatusBar from "@/components/StatusBar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
+import { cn } from "@/lib/utils";
+
+const inter = Inter({subsets:['latin'],variable:'--font-sans'});
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,7 +31,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable}`}
+      className={cn(geistSans.variable, geistMono.variable, "font-sans", inter.variable, "dark")}
     >
       <body
         style={{
@@ -37,18 +41,20 @@ export default function RootLayout({
           margin: 0,
         }}
       >
-        <Sidebar />
-        <main
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            background: "var(--background)",
-            paddingBottom: "28px",
-          }}
-        >
-          {children}
-        </main>
-        <StatusBar />
+        <TooltipProvider>
+          <Sidebar />
+          <main
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              background: "var(--background)",
+              paddingBottom: "28px",
+            }}
+          >
+            {children}
+          </main>
+          <StatusBar />
+        </TooltipProvider>
       </body>
     </html>
   );

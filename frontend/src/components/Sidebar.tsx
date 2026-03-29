@@ -29,6 +29,15 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
+  {
+    href: "/chat",
+    label: "Chat",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M1.5 2.5h13a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H5l-3.5 2.5V3.5a1 1 0 0 1 1-1z" />
+      </svg>
+    ),
+  },
 ];
 
 export default function Sidebar() {
@@ -37,17 +46,16 @@ export default function Sidebar() {
 
   useEffect(() => {
     const stored = localStorage.getItem("theme") as "dark" | "light" | null;
-    if (stored) {
-      setTheme(stored);
-      document.documentElement.classList.toggle("light", stored === "light");
-    }
+    const active = stored ?? "dark";
+    setTheme(active);
+    document.documentElement.classList.toggle("dark", active === "dark");
   }, []);
 
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
     localStorage.setItem("theme", next);
-    document.documentElement.classList.toggle("light", next === "light");
+    document.documentElement.classList.toggle("dark", next === "dark");
   }
 
   return (
