@@ -210,3 +210,4 @@ data/
 # Web UI (Vite)
 web/node_modules/
 web/dist/
+reference/
