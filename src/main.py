@@ -1,12 +1,10 @@
 """Entrypoint for the local meeting assistant."""
 
 import logging
-import sqlite3
 from pathlib import Path
 
-from src.config import DATA_DIR, DB_PATH, FAISS_DIR
-from src.db.migrations import run_migrations
-from src.db.schema import init_db
+from src.config import DATA_DIR, FAISS_DIR
+from src.db.connection import connect
 
 LOG_PATH = Path("/tmp/meeting_assistant.log")
 
@@ -25,12 +23,9 @@ def _ensure_dirs() -> None:
     FAISS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def get_connection() -> sqlite3.Connection:
-    """Return a configured SQLite connection."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+def get_connection():
+    """Return a configured SQLite connection (single-threaded TUI use)."""
+    return connect(check_same_thread=True)
 
 
 def _preinit_tqdm_lock() -> None:

@@ -6,6 +6,7 @@ from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
+from src.system import health as sysh
 from src.ui.widgets.meeting_list import MeetingList
 
 # Shown while the background check is running
@@ -69,10 +70,10 @@ class HomeScreen(Screen):
     @work(thread=True, name="system-check")
     def _run_system_check(self) -> None:
         """Check mic, Whisper, embedding, and LLM model availability."""
-        mic_ok, mic_msg = _check_microphone()
-        whisper_ok, whisper_msg = _check_whisper_model()
-        embed_ok, embed_msg = _check_embedding_model()
-        llm_ok, llm_msg = _check_llm_model()
+        mic_ok, mic_msg = sysh.check_microphone()
+        whisper_ok, whisper_msg = sysh.check_whisper_model()
+        embed_ok, embed_msg = sysh.check_embedding_model()
+        llm_ok, llm_msg = sysh.check_llm_model()
 
         mic_icon = "[green]●[/green]" if mic_ok else "[red]●[/red]"
         whisper_icon = "[green]●[/green]" if whisper_ok else "[red]●[/red]"
@@ -155,84 +156,3 @@ class HomeScreen(Screen):
     def action_refresh(self) -> None:
         self.query_one(MeetingList).refresh_meetings()
         self._run_system_check()
-
-
-# ------------------------------------------------------------------ #
-# Check helpers (pure functions, no UI deps, safe to call from a thread)
-# ------------------------------------------------------------------ #
-
-
-def _check_microphone() -> tuple[bool, str]:
-    """Open the mic for 0.5 s and verify it returns non-zero audio."""
-    try:
-        import time
-        import numpy as np
-        import sounddevice as sd
-
-        chunks: list[np.ndarray] = []
-
-        def _cb(indata, frames, t, status):
-            chunks.append(indata[:, 0].copy())
-
-        with sd.InputStream(
-            samplerate=16000, channels=1, dtype="float32",
-            blocksize=1024, callback=_cb
-        ):
-            time.sleep(0.5)
-
-        if not chunks:
-            return False, "No audio received from device"
-
-        max_rms = max(float(np.sqrt(np.mean(c ** 2))) for c in chunks)
-
-        if max_rms == 0.0:
-            return (
-                False,
-                "Mic returns silence — grant Terminal microphone access in "
-                "System Settings → Privacy & Security → Microphone",
-            )
-
-        device = sd.query_devices(kind="input")
-        name = device.get("name", "unknown") if isinstance(device, dict) else "unknown"
-        return True, f"{name} (RMS {max_rms:.4f})"
-
-    except Exception as exc:
-        return False, f"Error: {exc}"
-
-
-def _check_hf_model(repo_id: str, setup_flag: str = "") -> tuple[bool, str]:
-    """Generic HuggingFace model cache check. Returns (ok, short_message)."""
-    try:
-        from pathlib import Path
-        from huggingface_hub import snapshot_download
-        from huggingface_hub.utils import LocalEntryNotFoundError
-
-        short = repo_id.split("/")[-1]  # e.g. "whisper-large-v3-turbo"
-
-        if Path(repo_id).exists():
-            return True, f"[green]Ready[/green] [dim]{short}[/dim]"
-
-        try:
-            snapshot_download(repo_id=repo_id, local_files_only=True)
-            return True, f"[green]Ready[/green] [dim]{short}[/dim]"
-        except (LocalEntryNotFoundError, Exception):
-            cmd = f"setup_models.py {setup_flag}".strip()
-            return False, f"[red]Missing[/red] [dim]{short} — run: uv run python scripts/{cmd}[/dim]"
-
-    except Exception as exc:
-        return False, f"[red]Error[/red] [dim]{exc}[/dim]"
-
-
-def _check_whisper_model() -> tuple[bool, str]:
-    from src.config import WHISPER_MODEL
-    return _check_hf_model(WHISPER_MODEL, "--whisper-only")
-
-
-def _check_embedding_model() -> tuple[bool, str]:
-    from src.config import EMBEDDING_MODEL
-    return _check_hf_model(EMBEDDING_MODEL)
-
-
-def _check_llm_model() -> tuple[bool, str]:
-    from src.config import LLM_MODEL
-    return _check_hf_model(LLM_MODEL)

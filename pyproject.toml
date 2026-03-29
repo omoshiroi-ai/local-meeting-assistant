@@ -25,10 +25,14 @@ dependencies = [
     "huggingface-hub>=0.26.0",
     "psutil>=6.0.0",
     "tqdm>=4.67.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.0.0",
 ]
 
 [project.scripts]
 meeting-assistant = "src.main:main"
+meeting-assistant-api = "src.api.main:main"
 
 [tool.uv]
 dev-dependencies = [

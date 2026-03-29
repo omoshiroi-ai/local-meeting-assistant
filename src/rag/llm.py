@@ -80,6 +80,14 @@ class LLM:
         ):
             yield response.text
 
+    def generate(
+        self,
+        messages: list[dict],
+        max_tokens: int = LLM_MAX_NEW_TOKENS,
+    ) -> str:
+        """Non-streaming completion (collects token iterator)."""
+        return "".join(self.stream(messages, max_tokens=max_tokens))
+
     @property
     def is_loaded(self) -> bool:
         return self._model is not None

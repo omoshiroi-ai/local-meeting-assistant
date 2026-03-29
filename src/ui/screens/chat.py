@@ -111,20 +111,15 @@ class ChatScreen(Screen):
     @work(thread=True, name="rag")
     def _run_rag(self, query: str) -> None:
         """Retrieve chunks, build context, stream LLM response. Runs in a thread."""
-        from src.rag.context_builder import build_messages
-        from src.rag.llm import LLM
-        from src.rag.retriever import Retriever
+        from src.rag.chat_service import prepare_rag_stream
 
         app = self.app
         panel = self.query_one(ChatPanel)
 
         try:
-            # --- Retrieve ---
-            retriever = Retriever(app.conn)  # type: ignore[attr-defined]
-            retriever.load()
-            chunks = retriever.retrieve(query, meeting_id=self._meeting_id)
+            prepared = prepare_rag_stream(app.conn, self._meeting_id, query)  # type: ignore[attr-defined]
 
-            if not chunks:
+            if prepared is None:
                 app.call_from_thread(
                     panel.add_message,
                     "assistant",
@@ -133,24 +128,17 @@ class ChatScreen(Screen):
                 )
                 return
 
-            # --- Build prompt ---
-            messages = build_messages(query, chunks)
-            chunk_ids = [c.id for c in chunks]
-
-            # --- Stream LLM response ---
-            llm = LLM()
-            llm.load()
+            chunk_ids = prepared.chunk_ids
 
             app.call_from_thread(panel.begin_assistant_stream)
             full_response: list[str] = []
 
-            for token in llm.stream(messages):
+            for token in prepared.token_stream:
                 app.call_from_thread(panel.stream_token, token)
                 full_response.append(token)
 
             app.call_from_thread(panel.end_assistant_stream)
 
-            # Persist assistant response
             if self._session_id:
                 app.call_from_thread(
                     app.chat_repo.add_message,  # type: ignore[attr-defined]

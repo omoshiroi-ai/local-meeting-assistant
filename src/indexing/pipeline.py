@@ -17,6 +17,11 @@ from src.indexing.vector_store import VectorStore
 logger = logging.getLogger(__name__)
 
 
+def index_session(session_id: int, conn: sqlite3.Connection) -> int:
+    """SSOT name — same as indexing a `meetings` row."""
+    return index_meeting(session_id, conn)
+
+
 def index_meeting(meeting_id: int, conn: sqlite3.Connection) -> int:
     """Chunk, embed, and index all segments for a meeting.
 

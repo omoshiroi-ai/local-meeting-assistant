@@ -11,6 +11,7 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 
 def _now() -> str:
@@ -31,6 +32,11 @@ class Meeting:
     ended_at: str | None
     duration_secs: int | None
     notes: str
+    session_type: str
+    department_id: int | None
+    metadata: dict | None
+    wbs_node_id: int | None
+    case_id: str | None
     created_at: str
     updated_at: str
 
@@ -89,11 +95,32 @@ class MeetingRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
-    def create(self, title: str = "", source: str = "manual") -> int:
-        """Insert a new meeting and return its id."""
+    def create(
+        self,
+        title: str = "",
+        source: str = "manual",
+        session_type: str = "meeting",
+        metadata: dict | None = None,
+        department_id: int | None = None,
+        wbs_node_id: int | None = None,
+        case_id: str | None = None,
+    ) -> int:
+        """Insert a new meeting (recording session) and return its id."""
+        meta_json = json.dumps(metadata) if metadata else None
         cur = self._conn.execute(
-            "INSERT INTO meetings (title, source, started_at) VALUES (?, ?, ?)",
-            (title, source, _now()),
+            "INSERT INTO meetings (title, source, started_at, session_type, "
+            "department_id, metadata, wbs_node_id, case_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                title,
+                source,
+                _now(),
+                session_type,
+                department_id,
+                meta_json,
+                wbs_node_id,
+                case_id,
+            ),
         )
         self._conn.commit()
         return cur.lastrowid  # type: ignore[return-value]
@@ -123,19 +150,65 @@ class MeetingRepo:
     def get(self, meeting_id: int) -> Meeting | None:
         row = self._conn.execute(
             "SELECT id, title, source, started_at, ended_at, duration_secs, "
-            "notes, created_at, updated_at FROM meetings WHERE id = ?",
+            "notes, session_type, department_id, metadata, wbs_node_id, case_id, "
+            "created_at, updated_at FROM meetings WHERE id = ?",
             (meeting_id,),
         ).fetchone()
         return _row_to_meeting(row) if row else None
 
-    def list_all(self, limit: int = 100, offset: int = 0) -> list[Meeting]:
-        rows = self._conn.execute(
-            "SELECT id, title, source, started_at, ended_at, duration_secs, "
-            "notes, created_at, updated_at FROM meetings "
-            "ORDER BY started_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
+    def list_all(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        session_type: str | None = None,
+    ) -> list[Meeting]:
+        if session_type:
+            rows = self._conn.execute(
+                "SELECT id, title, source, started_at, ended_at, duration_secs, "
+                "notes, session_type, department_id, metadata, wbs_node_id, case_id, "
+                "created_at, updated_at FROM meetings "
+                "WHERE session_type = ? "
+                "ORDER BY started_at DESC LIMIT ? OFFSET ?",
+                (session_type, limit, offset),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, title, source, started_at, ended_at, duration_secs, "
+                "notes, session_type, department_id, metadata, wbs_node_id, case_id, "
+                "created_at, updated_at FROM meetings "
+                "ORDER BY started_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
         return [_row_to_meeting(r) for r in rows]
+
+    def patch_meeting(self, meeting_id: int, updates: dict[str, Any]) -> None:
+        """Patch meeting fields. Only keys present in `updates` are applied."""
+        m = self.get(meeting_id)
+        if not m:
+            return
+        new_title = updates["title"] if "title" in updates else m.title
+        new_st = updates["session_type"] if "session_type" in updates else m.session_type
+        new_meta = updates["metadata"] if "metadata" in updates else m.metadata
+        new_dept = updates["department_id"] if "department_id" in updates else m.department_id
+        new_wbs = updates["wbs_node_id"] if "wbs_node_id" in updates else m.wbs_node_id
+        new_case = updates["case_id"] if "case_id" in updates else m.case_id
+        meta_json = json.dumps(new_meta) if new_meta is not None else None
+        self._conn.execute(
+            "UPDATE meetings SET title = ?, session_type = ?, metadata = ?, "
+            "department_id = ?, wbs_node_id = ?, case_id = ?, updated_at = ? "
+            "WHERE id = ?",
+            (
+                new_title,
+                new_st,
+                meta_json,
+                new_dept,
+                new_wbs,
+                new_case,
+                _now(),
+                meeting_id,
+            ),
+        )
+        self._conn.commit()
 
     def delete(self, meeting_id: int) -> None:
         self._conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
@@ -345,6 +418,16 @@ class AppStateRepo:
 # ---------------------------------------------------------------------------
 
 
+def _parse_metadata_json(raw: str | None) -> dict | None:
+    if not raw:
+        return None
+    try:
+        out = json.loads(raw)
+        return out if isinstance(out, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
 def _row_to_meeting(row: sqlite3.Row) -> Meeting:
     return Meeting(
         id=row[0],
@@ -354,8 +437,13 @@ def _row_to_meeting(row: sqlite3.Row) -> Meeting:
         ended_at=row[4],
         duration_secs=row[5],
         notes=row[6],
-        created_at=row[7],
-        updated_at=row[8],
+        session_type=row[7],
+        department_id=row[8],
+        metadata=_parse_metadata_json(row[9]),
+        wbs_node_id=row[10],
+        case_id=row[11],
+        created_at=row[12],
+        updated_at=row[13],
     )
 
 

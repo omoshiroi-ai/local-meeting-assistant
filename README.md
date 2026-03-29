@@ -25,6 +25,7 @@ A fully local, privacy-first meeting assistant for Apple Silicon Macs. Records y
 - **RAG chat** — ask questions about any past meeting; Qwen2.5-7B streams answers with timestamps
 - **Post-meeting indexing** — automatic chunking + FAISS indexing runs in the background after you stop
 - **100% local** — no API keys, no cloud, nothing leaves your Mac
+- **Web UI** — optional Vite + React + TypeScript UI using `@nqlib/nqui`, talking to a local FastAPI layer (`/api/sessions`, SSE chat, health)
 
 ## Models
 
@@ -92,6 +93,30 @@ On first launch, macOS will prompt for microphone permission. If the mic check s
 ```bash
 uv run meeting-assistant
 ```
+
+### 6. Web UI + API (optional)
+
+Recordings are stored as **sessions** in SQLite (SSOT: same `meetings` table with `session_type`, `department_id`, `metadata`, `wbs_node_id`, `case_id` for future work/CS flows). The browser UI lists sessions, shows transcripts, runs RAG chat, and reindexes. **Live capture still uses the Textual app** above.
+
+**Terminal 1 — Python API** (binds to `127.0.0.1` only, default port `8765`):
+
+```bash
+uv run meeting-assistant-api
+```
+
+Override host/port with `MEETING_API_HOST` / `MEETING_API_PORT` if needed.
+
+**Terminal 2 — Vite frontend** (`web/`):
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open the printed local URL (e.g. `http://localhost:5173`). The dev server proxies `/api` to the API.
+
+**Production-style**: build the web app (`cd web && npm run build`), then either serve `web/dist` with any static server or mount it from a future FastAPI static route; the API must stay on the same origin or CORS must be configured.
 
 ---
 
@@ -171,6 +196,8 @@ All settings are in `src/config.py`. Override any of them with environment varia
 | `EMBEDDING_MODEL` | `nomic-ai/nomic-embed-text-v1.5` | Embedding model HF repo ID |
 | `LLM_MODEL` | `mlx-community/Qwen2.5-7B-Instruct-4bit` | LLM HF repo ID |
 | `MEETING_DATA_DIR` | `./data` | Directory for SQLite DB and FAISS index |
+| `MEETING_API_HOST` | `127.0.0.1` | Bind address for `meeting-assistant-api` |
+| `MEETING_API_PORT` | `8765` | Port for the FastAPI server |
 
 Example — use a smaller Whisper model:
 
@@ -182,7 +209,7 @@ WHISPER_MODEL=mlx-community/whisper-small uv run meeting-assistant
 
 ## Data
 
-All data lives in `data/` (gitignored):
+All data lives in `data/` (gitignored). Each **recording** is one row in `meetings` (SSOT session id) with optional `session_type` (`meeting`, `work_process`, `customer_service`), `department_id`, JSON `metadata`, `wbs_node_id`, and `case_id` for future technician / CS workflows.
 
 ```
 data/

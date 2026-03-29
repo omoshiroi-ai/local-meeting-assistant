@@ -1,0 +1,18 @@
+/* ═══════════════════════════════════════════════════
+   nqui – Recommended Tailwind & Import Setup
+   Add these lines to the TOP of your main CSS file
+   ═══════════════════════════════════════════════════ */
+
+@import "tailwindcss";
+
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Import nqui design tokens */
+@import "@nqlib/nqui/styles";
+
+/* Tailwind v4: scan app + nqui dist when utilities from the package are missing (see INSTALLATION.md §2c) */
+@source "./**/*.{js,ts,jsx,tsx,mdx}";
+@source "../components/**/*.{js,ts,jsx,tsx,mdx}";
+@source "../node_modules/@nqlib/nqui/dist/**/*.js";

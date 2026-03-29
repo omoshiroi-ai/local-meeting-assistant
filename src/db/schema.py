@@ -3,7 +3,7 @@
 import sqlite3
 
 # Increment this when adding new migrations in migrations.py
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meetings (
@@ -16,6 +16,11 @@ CREATE TABLE IF NOT EXISTS meetings (
                         CAST((JULIANDAY(ended_at) - JULIANDAY(started_at)) * 86400 AS INTEGER)
                     ) VIRTUAL,
     notes           TEXT NOT NULL DEFAULT '',
+    session_type    TEXT NOT NULL DEFAULT 'meeting',
+    department_id   INTEGER,
+    metadata        TEXT,
+    wbs_node_id     INTEGER,
+    case_id         TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -78,7 +83,42 @@ CREATE INDEX IF NOT EXISTS idx_meetings_started ON meetings(started_at DESC);
 """
 
 
+def _repair_legacy_meetings(conn: sqlite3.Connection) -> None:
+    """ALTER ``meetings`` on disk DBs created before SSOT columns existed.
+
+    ``CREATE TABLE IF NOT EXISTS`` does not add new columns to an existing table.
+    If any later DDL or app code expects ``session_type`` (or related columns),
+    apply the same additive ALTERs as migration v2 *before* ``executescript`` so
+    ``executescript`` cannot fail on indexes or constraints that reference them.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='meetings'"
+    ).fetchone()
+    if not row:
+        return
+    cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(meetings)").fetchall()}
+    if "session_type" not in cols:
+        conn.execute(
+            "ALTER TABLE meetings ADD COLUMN session_type TEXT NOT NULL DEFAULT 'meeting'"
+        )
+    if "department_id" not in cols:
+        conn.execute("ALTER TABLE meetings ADD COLUMN department_id INTEGER")
+    if "metadata" not in cols:
+        conn.execute("ALTER TABLE meetings ADD COLUMN metadata TEXT")
+    if "wbs_node_id" not in cols:
+        conn.execute("ALTER TABLE meetings ADD COLUMN wbs_node_id INTEGER")
+    if "case_id" not in cols:
+        conn.execute("ALTER TABLE meetings ADD COLUMN case_id TEXT")
+    conn.commit()
+
+
 def init_db(conn: sqlite3.Connection) -> None:
-    """Create all tables and indexes. Safe to call on an existing database."""
+    """Create all tables and indexes. Safe to call on an existing database.
+
+    Does not set ``user_version`` — call :func:`run_migrations` after this so
+    additive columns (e.g. ``session_type``) and dependent indexes apply to
+    databases created before those columns existed.
+    """
+    _repair_legacy_meetings(conn)
     conn.executescript(DDL)
     conn.commit()

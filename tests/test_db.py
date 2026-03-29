@@ -109,6 +109,25 @@ class TestMeetingRepo:
         repo.create()
         assert repo.count() == 2
 
+    def test_session_type_and_patch(self, conn):
+        repo = MeetingRepo(conn)
+        mid = repo.create("Work", session_type="work_process")
+        m = repo.get(mid)
+        assert m is not None
+        assert m.session_type == "work_process"
+        repo.patch_meeting(mid, {"title": "Patched", "case_id": "CS-1"})
+        m2 = repo.get(mid)
+        assert m2.title == "Patched"
+        assert m2.case_id == "CS-1"
+
+    def test_list_all_session_type_filter(self, conn):
+        repo = MeetingRepo(conn)
+        repo.create("A", session_type="meeting")
+        repo.create("B", session_type="work_process")
+        only_m = repo.list_all(session_type="meeting")
+        assert len(only_m) == 1
+        assert only_m[0].title == "A"
+
 
 # ---------------------------------------------------------------------------
 # SegmentRepo
@@ -306,17 +325,75 @@ class TestAppStateRepo:
 
 
 # ---------------------------------------------------------------------------
+# LLM settings (app_state)
+# ---------------------------------------------------------------------------
+
+
+class TestLlmSettings:
+    def test_override_and_clear(self, conn):
+        from src.db import llm_settings as ls
+        from src.db.llm_settings import get_effective_model_id
+
+        assert ls.get_stored_model_id(conn) is None
+        ls.patch_llm_settings(conn, {"model_id": "mlx-community/custom-override"})
+        assert get_effective_model_id(conn) == "mlx-community/custom-override"
+        ls.patch_llm_settings(conn, {"model_id": None})
+        assert ls.get_stored_model_id(conn) is None
+
+
+# ---------------------------------------------------------------------------
+# Legacy DB repair (session_type et al.)
+# ---------------------------------------------------------------------------
+
+
+class TestLegacySchemaRepair:
+    def test_init_db_repairs_meetings_without_session_type(self, tmp_path):
+        """Older DBs may have ``meetings`` without SSOT columns; init must not fail."""
+        db_path = tmp_path / "legacy.db"
+        c0 = sqlite3.connect(str(db_path))
+        c0.executescript(
+            """
+            CREATE TABLE meetings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'manual',
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            """
+        )
+        c0.commit()
+        c0.close()
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA foreign_keys=ON")
+        init_db(conn)
+        run_migrations(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(meetings)").fetchall()}
+        assert "session_type" in cols
+        repo = MeetingRepo(conn)
+        mid = repo.create("Legacy", session_type="meeting")
+        assert mid == 1
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
 
 
 class TestMigrations:
-    def test_initial_version_is_zero(self, conn):
-        # After init_db + run_migrations with no pending migrations, version stays 0
-        assert get_user_version(conn) == 0
+    def test_schema_version_matches_pragma(self, conn):
+        from src.db.schema import SCHEMA_VERSION
+
+        assert get_user_version(conn) == SCHEMA_VERSION
 
     def test_run_migrations_idempotent(self, conn):
-        # Running again should not raise or change state
+        from src.db.schema import SCHEMA_VERSION
+
         run_migrations(conn)
         run_migrations(conn)
-        assert get_user_version(conn) == 0
+        assert get_user_version(conn) == SCHEMA_VERSION

@@ -1,0 +1,10 @@
+/* nqui Design System
+ *
+ * This file imports nqui styles from the library package.
+ * Import this file in your main CSS file (e.g. globals.css)
+ *
+ * Usage in your globals.css:
+ *   @import "./nqui/index.css";
+ */
+
+@import "@nqlib/nqui/styles";
