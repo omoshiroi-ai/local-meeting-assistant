@@ -31,6 +31,7 @@ The backend auto-starts the `mlx-lm` server on first request and proxies all `/v
 |---|---|---|
 | STT | `mlx-community/whisper-large-v3-turbo` | ~800 MB |
 | LLM | `mlx-community/Qwen2.5-7B-Instruct-4bit` | ~4.5 GB |
+| Embeddings | `mlx-community/all-MiniLM-L6-v2-4bit` | ~22 MB |
 
 **Total: ~5.3 GB** downloaded on first run to `~/.cache/huggingface/hub/`.
 
@@ -54,30 +55,13 @@ The backend auto-starts the `mlx-lm` server on first request and proxies all `/v
 brew install portaudio
 ```
 
-### 2. Install Python dependencies
+### 2. Run setup
 
 ```bash
-uv sync
+make setup
 ```
 
-### 3. Download models
-
-```bash
-uv run python scripts/setup_models.py
-```
-
-To download only Whisper (recording without chat):
-
-```bash
-uv run python scripts/setup_models.py --whisper-only
-```
-
-### 4. Install frontend dependencies
-
-```bash
-cd frontend
-npm install
-```
+This installs Python and frontend dependencies, downloads all models (~5.3 GB), and syncs the vector database.
 
 ---
 
@@ -88,7 +72,7 @@ Open two terminals from the project root.
 **Terminal 1 — Backend** (FastAPI + mlx-lm, binds to `127.0.0.1:8765`):
 
 ```bash
-uv run python -m backend.main
+make backend
 ```
 
 The backend will automatically start the `mlx-lm` server as a subprocess on port `8080` and wait until it is healthy before accepting chat requests. First startup takes a few minutes while the model loads into memory.
@@ -96,11 +80,35 @@ The backend will automatically start the `mlx-lm` server as a subprocess on port
 **Terminal 2 — Frontend** (Next.js dev server, `http://localhost:3000`):
 
 ```bash
-cd frontend
-npm run dev
+make frontend
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+Or start both in a single split tmux session:
+
+```bash
+make dev
+```
+
+---
+
+## Make targets
+
+| Target | Description |
+|---|---|
+| `make setup` | Full first-time setup: install deps, download models, sync vector DB |
+| `make install` | Install Python + frontend dependencies only |
+| `make models` | Download and warm up Whisper + embedding models |
+| `make backend` | Start FastAPI backend (also starts mlx-lm subprocess on :8080) |
+| `make frontend` | Start Next.js dev server |
+| `make dev` | Start both in a split tmux session |
+| `make check` | Report model cache and ChromaDB index status |
+| `make sync-db` | Index any sessions missing from ChromaDB |
+| `make reindex` | Wipe ChromaDB and rebuild from scratch |
+| `make test` | Run backend tests |
+| `make lint` | Run ruff linter |
+| `make clean` | Delete `data/meetings.db`, `data/chromadb/`, `data/uploads/` |
 
 ---
 
@@ -133,7 +141,9 @@ All data lives in `data/` (gitignored):
 
 ```
 data/
-└── meetings.db    # SQLite: sessions, recordings, transcripts
+├── meetings.db    # SQLite: sessions, recordings, transcripts
+├── chromadb/      # ChromaDB vector store (RAG index)
+└── uploads/       # Raw audio files
 ```
 
 ---
