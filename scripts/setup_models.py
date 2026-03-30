@@ -4,7 +4,8 @@ Run once before first use:
     uv run python scripts/setup_models.py
 
 Models:
-    - mlx-community/whisper-large-v3-turbo  (~800 MB)  STT  [required]
+    - mlx-community/whisper-large-v3-turbo    (~800 MB)  STT        [required]
+    - mlx-community/all-MiniLM-L6-v2-4bit     (~22 MB)   Embeddings [required for RAG]
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import time
 from pathlib import Path
 
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
+EMBED_MODEL = "mlx-community/all-MiniLM-L6-v2-4bit"
 
 
 def _get_snapshot(model_id: str) -> Path | None:
@@ -68,9 +70,63 @@ def setup_whisper(model_id: str) -> bool:
     return True
 
 
+def setup_embed(model_id: str) -> bool:
+    print(f"\n[ Embeddings ]")
+    print(f"  Model : {model_id}")
+    t0 = time.monotonic()
+
+    # Step 1 — download weights
+    snapshot = _get_snapshot(model_id)
+    if snapshot and (snapshot / "model.safetensors").exists():
+        print(f"  Weights: already cached")
+        print(f"           {snapshot}")
+    else:
+        print("  Weights: downloading (~22 MB)…")
+        try:
+            from huggingface_hub import snapshot_download
+            local = snapshot_download(repo_id=model_id)
+            print(f"  Weights: downloaded to {local} ({time.monotonic() - t0:.0f}s)")
+        except Exception as e:
+            print(f"  Weights: FAILED — {e}", file=sys.stderr)
+            return False
+
+    # Step 2 — warm up: embed a short test string to load weights into MLX
+    print("  Loading into MLX… ", end="", flush=True)
+    t1 = time.monotonic()
+    try:
+        import os
+        os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
+        from mlx_embeddings.utils import load
+        import mlx.core as mx
+
+        model, tokenizer = load(model_id)
+        inputs = tokenizer.batch_encode_plus(
+            ["warm-up"], return_tensors="mlx", padding=True, truncation=True, max_length=16
+        )
+        out = model(inputs["input_ids"], attention_mask=inputs["attention_mask"])
+        mx.eval(out.text_embeds)
+        dims = out.text_embeds.shape[-1]
+        print(f"OK — dim={dims} ({time.monotonic() - t1:.0f}s)")
+    except Exception as e:
+        print(f"FAILED\n  Error: {e}", file=sys.stderr)
+        return False
+
+    print(f"  Total : {time.monotonic() - t0:.0f}s")
+    return True
+
+
 def check_whisper(model_id: str) -> None:
     snapshot = _get_snapshot(model_id)
     if snapshot and (snapshot / "weights.safetensors").exists():
+        print(f"  [OK]  {model_id}")
+        print(f"        {snapshot}")
+    else:
+        print(f"  [--]  {model_id}  (not downloaded)")
+
+
+def check_embed(model_id: str) -> None:
+    snapshot = _get_snapshot(model_id)
+    if snapshot and (snapshot / "model.safetensors").exists():
         print(f"  [OK]  {model_id}")
         print(f"        {snapshot}")
     else:
@@ -88,6 +144,12 @@ def main() -> None:
         help=f"Override Whisper model (default: {WHISPER_MODEL})",
     )
     parser.add_argument(
+        "--embed-model",
+        default=EMBED_MODEL,
+        metavar="HF_REPO",
+        help=f"Override embedding model (default: {EMBED_MODEL})",
+    )
+    parser.add_argument(
         "--check-only",
         action="store_true",
         help="Report cache status without downloading.",
@@ -102,14 +164,16 @@ def main() -> None:
     if args.check_only:
         print()
         check_whisper(args.whisper_model)
+        check_embed(args.embed_model)
         print()
         return
 
     total_start = time.monotonic()
-    ok = setup_whisper(args.whisper_model)
+    ok_whisper = setup_whisper(args.whisper_model)
+    ok_embed = setup_embed(args.embed_model)
 
     print(f"\n{'=' * width}")
-    if ok:
+    if ok_whisper and ok_embed:
         print(f"  Done. ({time.monotonic() - total_start:.0f}s)")
         print(f"  Start backend:  uv run python -m backend.main")
     else:
