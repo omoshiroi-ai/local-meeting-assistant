@@ -98,6 +98,11 @@ def delete_session(conn: ConnDep, session_id: int):
         raise HTTPException(status_code=404, detail="Session not found")
     conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
+    try:
+        from backend.services.rag import delete_session as rag_delete
+        rag_delete(session_id)
+    except Exception:
+        pass  # ChromaDB cleanup is best-effort
 
 
 @router.get("/{session_id}/segments", response_model=list[SegmentOut])

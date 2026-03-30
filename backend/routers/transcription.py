@@ -110,6 +110,17 @@ def _run_transcription(session_id: int, audio_path: str) -> None:
         conn.commit()
         logger.info("Transcription done for session %d: %d segments", session_id, len(segments))
 
+        # Index into ChromaDB for RAG
+        try:
+            session_row = conn.execute(
+                "SELECT title FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            session_title = session_row["title"] if session_row else f"Session {session_id}"
+            from backend.services.rag import ingest_session
+            ingest_session(session_id=session_id, session_title=session_title, segments=segments)
+        except Exception:
+            logger.exception("RAG indexing failed for session %d (transcription still succeeded)", session_id)
+
     except Exception as exc:
         logger.exception("Transcription failed for session %d", session_id)
         conn.execute(

@@ -12,8 +12,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.db import connect, init_db
-from backend.routers import sessions, transcription
-from backend.routers import chat
+from backend.routers import chat, sessions, transcription
+from backend.routers import rag as rag_router
 from backend.services.transcriber import _ensure_model
 from backend.services.llm import LLM_MODEL, LLM_PORT, LLM_SERVER_URL, start_llm_server
 
@@ -32,6 +32,14 @@ async def lifespan(app: FastAPI):
         logger.info("Whisper model ready.")
     except Exception as exc:
         logger.error("Failed to prepare Whisper model at startup: %s", exc)
+
+    # Warm up ChromaDB collection (creates on-disk store if first run)
+    try:
+        from backend.services.rag import get_collection
+        await asyncio.to_thread(get_collection)
+        logger.info("ChromaDB collection ready.")
+    except Exception as exc:
+        logger.error("Failed to initialise ChromaDB: %s", exc)
 
     app.state.llm_url = LLM_SERVER_URL
     llm_proc = None
@@ -63,6 +71,7 @@ app.add_middleware(
 app.include_router(sessions.router)
 app.include_router(transcription.router)
 app.include_router(chat.router)
+app.include_router(rag_router.router)
 
 
 @app.get("/api/health")
