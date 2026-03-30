@@ -1,29 +1,47 @@
 # Local Meeting Assistant
 
-A fully local, privacy-first meeting assistant for Apple Silicon Macs. Records meetings, transcribes them on-device using Whisper via MLX, and lets you chat with an on-device LLM — no cloud, no API keys.
+A fully local, privacy-first meeting assistant for Apple Silicon Macs. Records meetings, transcribes them on-device using Whisper via MLX, and lets you chat with a local LLM — with answers grounded in your actual transcripts via RAG. No cloud, no API keys.
 
 ## Architecture
 
 ```mermaid
 graph LR
     Browser["Browser<br/>(Next.js :3000)"]
+    FastAPI["FastAPI backend<br/>(:8765)"]
+    SQLite["SQLite<br/>(sessions, segments)"]
+    ChromaDB["ChromaDB<br/>(vector store)"]
+    Whisper["Whisper via mlx-whisper<br/>(transcription)"]
+    Embed["mlx-embeddings<br/>(all-MiniLM-L6-v2)"]
+    LLM["mlx-lm<br/>(:8080, auto-started)"]
+    StreamText["streamText<br/>(Next.js route handler)"]
 
-    Browser -- "/api/* (rewrite)" --> FastAPI["FastAPI backend<br/>(:8765)"]
-    FastAPI --> SQLite["SQLite<br/>(sessions, transcripts)"]
-    FastAPI -- "/v1/chat/completions" --> MLX["mlx-lm<br/>(:8080, auto-started)"]
+    Browser -- "/api/* (rewrite)" --> FastAPI
+    FastAPI --> SQLite
 
-    Browser -- "/api/chat<br/>(route handler)" --> StreamText["streamText"]
+    %% Transcription → ingest
+    FastAPI -- "audio" --> Whisper
+    Whisper -- "segments" --> SQLite
+    Whisper -- "segments" --> Embed
+    Embed -- "embeddings" --> ChromaDB
+
+    %% Chat with RAG
+    Browser -- "/api/chat" --> StreamText
     StreamText -- "/v1/chat/completions" --> FastAPI
+    FastAPI -- "user query" --> Embed
+    Embed -- "query embedding" --> ChromaDB
+    ChromaDB -- "top-k excerpts" --> FastAPI
+    FastAPI -- "prompt + context" --> LLM
+    LLM -- "stream" --> FastAPI
 ```
 
-The backend auto-starts the `mlx-lm` server on first request and proxies all `/v1/chat/completions` calls to it. You only need to run two processes.
+The backend auto-starts the `mlx-lm` server on first request. When audio is uploaded, Whisper transcribes it and the segments are both stored in SQLite and embedded into ChromaDB. On each chat turn, the user's query is embedded, the top-5 most relevant transcript excerpts are retrieved, and they are injected into the system prompt before the request is forwarded to `mlx-lm`. You only need to run two processes.
 
 ## Features
 
 - **Sessions** — browse past recordings with duration and status
 - **Record** — capture audio locally; transcription runs on-device via Whisper + MLX
 - **Transcript** — view timestamped transcript for any session
-- **Chat** — stream responses from a local Qwen2.5-7B LLM; uses the same OpenAI-compatible API
+- **Chat** — answers streamed from a local Qwen2.5-7B LLM, grounded in your transcripts via RAG; relevant excerpts are retrieved from ChromaDB and injected into the prompt automatically
 
 ## Models
 
