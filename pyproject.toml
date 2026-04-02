@@ -44,9 +44,6 @@ dev-dependencies = [
     "ruff>=0.8.0",
 ]
 
-[tool.uv.sources]
-mlx-audio = { path = "reference/mlx-audio" }
-
 [tool.ruff]
 line-length = 100
 target-version = "py312"
