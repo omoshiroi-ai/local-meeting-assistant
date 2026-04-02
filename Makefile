@@ -13,7 +13,8 @@
 #   make check        report model cache and index status
 
 .PHONY: help setup install install-py install-frontend models sync-db check \
-        backend frontend dev test lint clean
+        backend frontend dev test lint clean \
+        uv-sync uv-add uv-remove uv-lock uv-tree
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,13 @@ help:
 	@echo "    make test            Run backend tests"
 	@echo "    make lint            Run ruff linter"
 	@echo "    make clean           Remove generated data (meetings.db, chromadb, uploads)"
+	@echo ""
+	@echo "  UV Package Management"
+	@echo "    make uv-sync         Sync dependencies from lockfile"
+	@echo "    make uv-add pkg=X    Add a dependency"
+	@echo "    make uv-remove pkg=X Remove a dependency"
+	@echo "    make uv-lock         Regenerate uv.lock"
+	@echo "    make uv-tree         Show dependency tree"
 	@echo ""
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
@@ -118,6 +126,28 @@ test:
 
 lint:
 	uv run ruff check backend scripts tests
+
+# ── UV Package Management ────────────────────────────────────────────────────
+
+## Sync dependencies from lockfile
+uv-sync:
+	uv sync
+
+## Add a dependency: make uv-add pkg=httpx
+uv-add:
+	uv add $(pkg)
+
+## Remove a dependency: make uv-remove pkg=httpx
+uv-remove:
+	uv remove $(pkg)
+
+## Regenerate uv.lock
+uv-lock:
+	uv lock
+
+## Show dependency tree
+uv-tree:
+	uv tree
 
 ## Remove generated data directories (keeps models in HF cache)
 clean:

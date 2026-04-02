@@ -25,7 +25,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
 
 
+def _table_exists(conn, table: str) -> bool:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone()
+    return row[0] > 0
+
+
 def _get_db_sessions(conn, session_id: int | None) -> list:
+    if not _table_exists(conn, "sessions"):
+        return []
     if session_id is not None:
         rows = conn.execute(
             "SELECT id, title, status FROM sessions WHERE id = ? AND status = 'done'",
